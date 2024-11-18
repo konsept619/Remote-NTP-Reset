@@ -1,0 +1,63 @@
+#!/bin/bash
+DATE=$( date +"%F %T" )
+
+if [ -e ./params_server.conf ]; then
+  . ./params_server.conf
+else 
+  echo "Configuration file doesn't exist or its name was changed! Make sure proper file is placed in working directory and has a proper name."
+  exit 1
+fi
+
+declare -A TASK_STATUS
+for client in "${ADDRESSES[@]}"; do
+  TASK_STATUS[$client]=0
+done
+
+printf %"s\n" ============================================================== "$DATE Executing script..." >> $LOG_FILE 
+
+while true; do
+  ALL_DONE=true
+  for client in "${ADDRESSES[@]}"; do 
+    DATE=$( date +"%F %T" )
+    if [ ${TASK_STATUS[$client]} -eq 1 ]; then 
+      echo "$DATE, Task was performed on $client before" >> $LOG_FILE
+      continue 
+    fi 
+    echo "$DATE, Checking status for $client." >> $LOG_FILE
+
+    if ping -c 1 "$client" &> /dev/null; then 
+
+      ssh $USERNAME@$client '[ -f /tmp/script_executed.flag ]' &> /dev/null
+      if [ $? -ne 0 ]; then
+        echo "$DATE, Executing script on $client..." >> $LOG_FILE
+        ssh $USERNAME@$client "$COMMAND $DATE && touch /tmp/script_executed.flag" 
+        if [ $? -eq 0 ]; then 
+          echo "$DATE, Task finished successfully on client $client." >> $LOG_FILE 
+          TASK_STATUS[$client]=1
+        fi
+      else 
+        echo "$DATE, Task was performed on $client before." >> $LOG_FILE
+        TASK_STATUS[$client]=1
+      fi
+    else 
+      echo "$DATE, $client is offline. Task will be perfomer later" >> $LOG_FILE
+      ALL_DONE=false
+    fi
+  done 
+
+  ALL_DONE=true
+  for client in "${ADDRESSES[@]}"; do
+    if [ ${TASK_STATUS[$client]} -eq 0 ]; then
+      ALL_DONE=false
+      break
+    fi
+  done
+  if [ "$ALL_DONE" = true ]; then
+    echo "$DATE, Task was performed on all hosts. Exiting script..." >> $LOG_FILE
+    break 
+  fi
+
+  echo "$DATE, Wating for another try..." >> $LOG_FILE
+  sleep $DELAY
+done 
+
